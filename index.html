@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gage &amp; Line — SPC / Cpk Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* ============================= TOKENS ============================= */
+:root{
+  --paper:#EDEEE9;
+  --panel:#F7F7F3;
+  --ink:#1B2027;
+  --steel:#4A5563;
+  --steel-soft:#7C8894;
+  --line:#C7CCC2;
+  --grid:#DBDED6;
+  --blue:#2C5F8A;
+  --blue-soft:#D9E5EE;
+  --amber:#B9761F;
+  --amber-soft:#F3E3CC;
+  --red:#AE3A32;
+  --red-soft:#F4DAD7;
+  --green:#3C6E4A;
+  --green-soft:#DCE9DF;
+  --radius:3px;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Consolas,monospace;
+  --disp:'Barlow Condensed',Arial Narrow,sans-serif;
+}
+:root:not([data-theme="light"]){
+  @media (prefers-color-scheme: dark){
+    --paper:#14181C; --panel:#1B2027; --ink:#E7E9E4; --steel:#A6B0B9; --steel-soft:#7C8894;
+    --line:#2C343B; --grid:#2C343B; --blue:#6FA3CC; --blue-soft:#1E2E3A; --amber:#E0A24F;
+    --amber-soft:#3A2F1C; --red:#E0766C; --red-soft:#3A2220; --green:#7FBF8F; --green-soft:#1E2E22;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#14181C; --panel:#1B2027; --ink:#E7E9E4; --steel:#A6B0B9; --steel-soft:#7C8894;
+  --line:#2C343B; --grid:#2C343B; --blue:#6FA3CC; --blue-soft:#1E2E3A; --amber:#E0A24F;
+  --amber-soft:#3A2F1C; --red:#E0766C; --red-soft:#3A2220; --green:#7FBF8F; --green-soft:#1E2E22;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:var(--mono); font-size:13px; line-height:1.6;
+  min-height:100vh;
+}
+h1,h2,h3,h4,.disp,button,.navlabel,.tabbtn,.kpi-label,th{font-family:var(--disp);}
+::selection{background:var(--blue);color:#fff;}
+a{color:var(--blue);}
+
+/* ============================= LAYOUT ============================= */
+.app{display:flex;min-height:100vh;}
+.railnav{
+  width:64px;flex:0 0 64px;background:var(--ink);color:var(--paper);
+  display:flex;flex-direction:column;align-items:stretch;
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+:root[data-theme="dark"] .railnav, :root:not([data-theme="light"]) .railnav{background:#0B0E11;}
+.rail-brand{
+  padding:16px 0 12px;text-align:center;border-bottom:1px solid rgba(255,255,255,.12);
+}
+.rail-brand .mark{
+  width:30px;height:30px;margin:0 auto;border:2px solid var(--amber);border-radius:2px;
+  display:flex;align-items:center;justify-content:center;font-family:var(--disp);
+  font-weight:700;font-size:15px;color:var(--amber);
+}
+.railnav .navitem{
+  background:none;border:none;color:rgba(255,255,255,.65);cursor:pointer;
+  padding:12px 4px 10px;display:flex;flex-direction:column;align-items:center;gap:5px;
+  border-left:3px solid transparent;font-size:10px;letter-spacing:.02em;
+}
+.railnav .navitem svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.6;}
+.railnav .navitem:hover{color:#fff;background:rgba(255,255,255,.05);}
+.railnav .navitem.active{color:#fff;border-left-color:var(--amber);background:rgba(255,255,255,.06);}
+.rail-spacer{flex:1;}
+.rail-status{padding:10px 4px;text-align:center;font-size:9px;color:rgba(255,255,255,.4);border-top:1px solid rgba(255,255,255,.1);}
+.rail-status .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--steel-soft);margin-right:4px;}
+.rail-status.ok .dot{background:var(--green);}
+.rail-status.bad .dot{background:var(--red);}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column;}
+.topbar{
+  border-bottom:1px solid var(--line);background:var(--panel);
+  padding:14px 24px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  position:sticky;top:0;z-index:5;
+}
+.topbar .id-block{flex:1;min-width:220px;}
+.topbar h1{margin:0;font-size:22px;font-weight:600;letter-spacing:.01em;line-height:1.1;}
+.topbar .subline{color:var(--steel);font-size:11.5px;margin-top:3px;}
+.topbar .actions{display:flex;gap:8px;flex-wrap:wrap;}
+
+.view{display:none;padding:20px 24px 60px;}
+.view.active{display:block;}
+
+/* ============================= BUTTONS / FORMS ============================= */
+button{cursor:pointer;font-size:12.5px;}
+.btn{
+  border:1px solid var(--ink);background:var(--ink);color:var(--paper);
+  padding:8px 14px;border-radius:var(--radius);font-weight:600;letter-spacing:.02em;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.btn:hover{opacity:.85;}
+.btn:disabled{opacity:.35;cursor:not-allowed;}
+.btn.outline{background:transparent;color:var(--ink);border-color:var(--line);}
+.btn.outline:hover{border-color:var(--ink);opacity:1;}
+.btn.amber{background:var(--amber);border-color:var(--amber);color:#211505;}
+.btn.small{padding:5px 10px;font-size:11px;}
+
+label{display:block;font-family:var(--disp);font-size:12px;color:var(--steel);margin-bottom:4px;letter-spacing:.01em;}
+input[type="text"],input[type="number"],select,input[type="search"]{
+  width:100%;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:7px 9px;font-family:var(--mono);font-size:12.5px;color:var(--ink);
+}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}
+.field{margin-bottom:12px;}
+.field-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;}
+.checkline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink);margin-bottom:8px;}
+.checkline input{width:auto;}
+.hint{color:var(--steel-soft);font-size:11px;margin-top:4px;}
+
+/* ============================= PANELS ============================= */
+.panel{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 18px;margin-bottom:18px;position:relative;
+}
+.panel-title{
+  font-family:var(--disp);font-size:15px;font-weight:600;margin:0 0 12px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+}
+.panel-title .meta{font-family:var(--mono);font-size:10.5px;color:var(--steel-soft);font-weight:400;}
+.corner{position:absolute;width:8px;height:8px;border-color:var(--line);}
+.corner.tl{top:-1px;left:-1px;border-top:2px solid var(--amber);border-left:2px solid var(--amber);}
+.corner.br{bottom:-1px;right:-1px;border-bottom:2px solid var(--amber);border-right:2px solid var(--amber);}
+
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;}
+.grid2.rev{grid-template-columns:1fr 1.4fr;}
+@media (max-width: 980px){.grid2,.grid2.rev{grid-template-columns:1fr;}}
+
+/* KPI cards */
+.kpi-strip{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:18px;}
+@media (max-width:1200px){.kpi-strip{grid-template-columns:repeat(4,1fr);}}
+@media (max-width:640px){.kpi-strip{grid-template-columns:repeat(2,1fr);}}
+.kpi{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:10px 12px;border-left:3px solid var(--steel-soft);
+}
+.kpi.blue{border-left-color:var(--blue);}
+.kpi.amber{border-left-color:var(--amber);}
+.kpi.red{border-left-color:var(--red);}
+.kpi.green{border-left-color:var(--green);}
+.kpi-label{font-size:10.5px;color:var(--steel);letter-spacing:.03em;margin-bottom:4px;}
+.kpi-value{font-family:var(--mono);font-size:19px;font-weight:600;}
+.kpi-unit{font-size:10px;color:var(--steel-soft);margin-left:2px;}
+
+/* badges */
+.badge{display:inline-block;padding:2px 7px;border-radius:2px;font-size:10.5px;font-family:var(--disp);font-weight:600;letter-spacing:.02em;}
+.badge.ok{background:var(--green-soft);color:var(--green);}
+.badge.warn{background:var(--amber-soft);color:var(--amber);}
+.badge.bad{background:var(--red-soft);color:var(--red);}
+.badge.neutral{background:var(--line);color:var(--steel);}
+
+/* banners */
+.banner{border-radius:var(--radius);padding:10px 13px;font-size:12px;margin-bottom:12px;border:1px solid;}
+.banner.err{background:var(--red-soft);border-color:var(--red);color:var(--red);}
+.banner.warn{background:var(--amber-soft);border-color:var(--amber);color:var(--amber);}
+.banner.ok{background:var(--green-soft);border-color:var(--green);color:var(--green);}
+.banner ul{margin:6px 0 0;padding-left:18px;}
+
+/* tables */
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);}
+table{border-collapse:collapse;width:100%;font-size:11.5px;white-space:nowrap;}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;}
+th{background:var(--paper);position:sticky;top:0;font-weight:600;letter-spacing:.02em;cursor:pointer;user-select:none;font-size:11px;}
+th:hover{color:var(--blue);}
+th .arrow{font-size:9px;opacity:.6;margin-left:3px;}
+tbody tr:hover{background:var(--blue-soft);}
+tr.row-oos td{background:var(--red-soft);}
+tr.row-oos:hover td{background:var(--red-soft);filter:brightness(.96);}
+
+.table-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+.table-toolbar input[type="search"]{max-width:220px;}
+.pager{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:11.5px;color:var(--steel);}
+
+/* dropzone */
+.dropzone{
+  border:1.5px dashed var(--line);border-radius:var(--radius);padding:38px 20px;text-align:center;
+  color:var(--steel);cursor:pointer;background:var(--panel);
+}
+.dropzone.drag{border-color:var(--blue);background:var(--blue-soft);color:var(--ink);}
+.dropzone h3{margin:8px 0 4px;font-size:17px;}
+.dropzone p{margin:0;font-size:11.5px;}
+
+.stepline{display:flex;gap:0;margin:0 0 18px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
+.step{flex:1;padding:8px 10px;font-family:var(--disp);font-size:12px;font-weight:600;color:var(--steel-soft);border-right:1px solid var(--line);position:relative;}
+.step:last-child{border-right:none;}
+.step.done{color:var(--ink);background:var(--blue-soft);}
+.step.current{color:var(--ink);background:var(--amber-soft);}
+
+.chart-box{position:relative;height:280px;}
+.chart-box.tall{height:340px;}
+.legend-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:10.5px;color:var(--steel);}
+.legend-row .sw{display:inline-block;width:11px;height:2.5px;margin-right:4px;vertical-align:middle;}
+.legend-row .sw.dot{width:8px;height:8px;border-radius:50%;vertical-align:-1px;}
+
+.method-note{
+  font-size:11px;color:var(--steel);background:var(--paper);border:1px dashed var(--line);
+  border-radius:var(--radius);padding:9px 11px;margin-top:10px;
+}
+
+.empty-state{text-align:center;padding:60px 20px;color:var(--steel);}
+.empty-state h2{font-size:20px;color:var(--ink);margin-bottom:8px;}
+.empty-state .btn{margin-top:14px;}
+
+.formula{font-family:var(--mono);font-size:11.5px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;display:inline-block;}
+
+.rule-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
+.rule-toggle:last-child{border-bottom:none;}
+.rule-toggle .name{font-size:12.5px;}
+.rule-toggle .desc{font-size:10.5px;color:var(--steel-soft);}
+.rule-n{width:52px;padding:3px 5px;font-size:11px;}
+
+.two-col-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
+.tabbtn{background:transparent;border:1px solid var(--line);color:var(--steel);padding:6px 13px;border-radius:var(--radius);font-size:12.5px;font-weight:600;}
+.tabbtn.active{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+
+.viol-value{font-weight:600;}
+
+@media print{ .railnav,.topbar .actions{display:none;} }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================= LEFT RAIL NAV ============================= -->
+  <nav class="railnav" id="railnav">
+    <div class="rail-brand"><div class="mark">Q</div></div>
+    <button class="navitem active" data-view="dashboard">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      Dashboard
+    </button>
+    <button class="navitem" data-view="import">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
+      Import
+    </button>
+    <button class="navitem" data-view="spc">
+      <svg viewBox="0 0 24 24"><path d="M3 17l4-5 4 3 5-8 5 4"/><path d="M3 21h18"/></svg>
+      SPC
+    </button>
+    <button class="navitem" data-view="cpk">
+      <svg viewBox="0 0 24 24"><path d="M3 20V10"/><path d="M9 20V4"/><path d="M15 20v-7"/><path d="M21 20V8"/></svg>
+      Cpk
+    </button>
+    <button class="navitem" data-view="data">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 10h18"/><path d="M9 4v16"/></svg>
+      Data
+    </button>
+    <button class="navitem" data-view="reports">
+      <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7"/><path d="M9 17h7"/></svg>
+      Reports
+    </button>
+    <div class="rail-spacer"></div>
+    <div class="rail-status" id="railStatus"><span class="dot"></span>NO DATA</div>
+  </nav>
+
+  <!-- ============================= MAIN ============================= -->
+  <div class="main">
+    <div class="topbar">
+      <div class="id-block">
+        <h1 id="topPartName">SPC &amp; Process Capability Analyzer</h1>
+        <div class="subline" id="topSubline">Import measurement data to begin — or load the demo dataset.</div>
+      </div>
+      <div class="actions">
+        <button class="btn outline small" id="btnDemo">Load demo dataset</button>
+        <button class="btn amber" id="btnAnalyze" disabled>Analyze</button>
+        <button class="btn outline" id="btnExport" disabled>Export report</button>
+      </div>
+    </div>
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <div class="view active" id="view-dashboard">
+      <div id="dashEmpty" class="empty-state">
+        <h2>No analysis yet</h2>
+        <p>Import an Excel file on the <strong>Import</strong> tab, choose the measurement column and specification limits, then click Analyze — or load the demo dataset to explore the tool.</p>
+        <button class="btn amber" id="btnDemo2">Load demo dataset</button>
+      </div>
+      <div id="dashContent" style="display:none;">
+        <div class="kpi-strip" id="kpiStrip"></div>
+        <div class="grid2">
+          <div class="panel">
+            <div class="panel-title">SPC Control Chart <span class="meta" id="spcChartMeta"></span></div>
+            <div class="chart-box tall"><canvas id="chartSpcMain"></canvas></div>
+            <div class="chart-box" style="height:150px;margin-top:6px;"><canvas id="chartSpcSecondary"></canvas></div>
+            <div class="legend-row" id="spcLegend"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">Histogram &amp; Distribution</div>
+            <div class="chart-box tall"><canvas id="chartHistoMini"></canvas></div>
+            <div class="legend-row" id="histLegendMini"></div>
+          </div>
+        </div>
+        <div class="grid2 rev">
+          <div class="panel">
+            <div class="panel-title">Process Capability</div>
+            <div id="cpkMiniPanel"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">SPC Rule Violations <span class="meta" id="violCountMeta"></span></div>
+            <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+              <table id="violTableMini"><thead></thead><tbody></tbody></table>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Data Table <span class="meta">preview — full table on the Data tab</span></div>
+          <div class="table-wrap"><table id="dataTableMini"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== IMPORT ===================== -->
+    <div class="view" id="view-import">
+      <div class="stepline" id="stepline">
+        <div class="step current" data-step="1">1 · Upload file</div>
+        <div class="step" data-step="2">2 · Map columns</div>
+        <div class="step" data-step="3">3 · Set specification</div>
+        <div class="step" data-step="4">4 · Validate &amp; analyze</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">1 · Upload Excel file</div>
+        <div class="dropzone" id="dropzone">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
+          <h3 id="dzTitle">Drop a .xlsx file here, or click to browse</h3>
+          <p>Accepts .xlsx / .xls. The original file is never modified. Nothing is sent to a server — parsing happens in your browser.</p>
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none;">
+        <div id="fileInfo" class="hint" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="panel" id="previewPanel" style="display:none;">
+        <div class="panel-title">Data preview <span class="meta" id="previewMeta"></span></div>
+        <div class="table-wrap" style="max-height:260px;overflow-y:auto;"><table id="previewTable"><thead></thead><tbody></tbody></table></div>
+      </div>
+
+      <div class="panel" id="mapPanel" style="display:none;">
+        <div class="panel-title">2 · Select measurement column</div>
+        <div class="field-row">
+          <div class="field">
+            <label for="selMeasurement">Measurement column</label>
+            <select id="selMeasurement"></select>
+          </div>
+          <div class="field">
+            <label for="selCharUnit">Characteristic / unit</label>
+            <input type="text" id="selCharUnit" placeholder="e.g. Housing Diameter, mm">
+          </div>
+          <div class="field">
+            <label for="selSubgroup">Subgroup size</label>
+            <select id="selSubgroup">
+              <option value="1">1 — Individuals (I-MR chart)</option>
+              <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+              <option value="5" selected>5</option><option value="6">6</option><option value="7">7</option>
+              <option value="8">8</option><option value="9">9</option><option value="10">10</option>
+            </select>
+            <div class="hint">Consecutive rows are grouped into rational subgroups of this size for X-bar/R charting.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="specPanel" style="display:none;">
+        <div class="panel-title">3 · Specification limits</div>
+        <div class="field-row">
+          <div class="field"><label for="inLSL">LSL (lower spec limit)</label><input type="number" step="any" id="inLSL"></div>
+          <div class="field"><label for="inTarget">Target / nominal</label><input type="number" step="any" id="inTarget"></div>
+          <div class="field"><label for="inUSL">USL (upper spec limit)</label><input type="number" step="any" id="inUSL"></div>
+          <div class="field">
+            <label for="selSigma">Sigma method (capability)</label>
+            <select id="selSigma">
+              <option value="within" selected>Within-subgroup (R̄/d2 or MR̄/d2) — recommended</option>
+              <option value="overall">Overall sample standard deviation</option>
+            </select>
+          </div>
+        </div>
+        <div class="hint">Values are pre-filled from LSL/Target/USL columns in the sheet when present — edit freely. Specification limits are never used to calculate control limits.</div>
+      </div>
+
+      <div class="panel" id="rulesPanel" style="display:none;">
+        <div class="panel-title">4 · SPC rule configuration</div>
+        <div id="ruleConfigList"></div>
+      </div>
+
+      <div class="panel" id="validationPanel" style="display:none;">
+        <div class="panel-title">Validation</div>
+        <div id="validationOutput"></div>
+      </div>
+    </div>
+
+    <!-- ===================== SPC ===================== -->
+    <div class="view" id="view-spc">
+      <div id="spcEmpty" class="empty-state"><h2>No analysis yet</h2><p>Run an analysis from the Import tab first.</p></div>
+      <div id="spcContent" style="display:none;">
+        <div class="panel">
+          <div class="panel-title">Primary chart <span class="meta" id="spcTitleMeta"></span></div>
+          <div class="chart-box tall"><canvas id="chartSpcPrimaryFull"></canvas></div>
+          <div class="legend-row" id="spcLegendFull"></div>
+          <div class="method-note" id="spcMethodNote"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title" id="spcSecondaryTitle">Variation chart</div>
+          <div class="chart-box"><canvas id="chartSpcSecondaryFull"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Rule violations <span class="meta" id="violCountMeta2"></span></div>
+          <div class="table-wrap"><table id="violTableFull"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== CPK ===================== -->
+    <div class="view" id="view-cpk">
+      <div id="cpkEmpty" class="empty-state"><h2>No analysis yet</h2><p>Run an analysis from the Import tab first.</p></div>
+      <div id="cpkContent" style="display:none;">
+        <div class="grid2">
+          <div class="panel">
+            <div class="panel-title">Distribution vs. specification</div>
+            <div class="chart-box tall"><canvas id="chartHistoFull"></canvas></div>
+            <div class="legend-row" id="histLegendFull"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">Capability indices</div>
+            <div id="cpkFullPanel"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Statistical summary</div>
+          <div class="table-wrap"><table id="statsTable"><thead><tr><th>Statistic</th><th>Value</th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Calculation method</div>
+          <div id="methodDetail"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== DATA ===================== -->
+    <div class="view" id="view-data">
+      <div id="dataEmpty" class="empty-state"><h2>No data imported</h2><p>Import a file from the Import tab, or load the demo dataset.</p></div>
+      <div id="dataContentWrap" style="display:none;">
+        <div class="panel">
+          <div class="panel-title">Imported data</div>
+          <div class="table-toolbar">
+            <input type="search" id="dataSearch" placeholder="Search rows…">
+            <label class="checkline" style="margin:0;"><input type="checkbox" id="chkAbnormalOnly"> Show only abnormal / out-of-control rows</label>
+            <span class="hint" id="dataCountHint"></span>
+          </div>
+          <div class="table-wrap"><table id="dataTableFull"><thead></thead><tbody></tbody></table></div>
+          <div class="pager">
+            <button class="btn outline small" id="pagerPrev">◂ Prev</button>
+            <span id="pagerLabel">Page 1</span>
+            <button class="btn outline small" id="pagerNext">Next ▸</button>
+            <select id="pageSizeSel" style="width:auto;margin-left:auto;">
+              <option value="25">25 / page</option><option value="50" selected>50 / page</option><option value="100">100 / page</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== REPORTS ===================== -->
+    <div class="view" id="view-reports">
+      <div id="reportsEmpty" class="empty-state"><h2>No analysis yet</h2><p>Run an analysis first, then export a complete Excel report.</p></div>
+      <div id="reportsContent" style="display:none;">
+        <div class="panel">
+          <div class="panel-title">Export report</div>
+          <p style="margin-top:0;">Generates a multi-sheet Excel workbook: Raw Data, Statistical Summary, SPC Analysis, CPK Analysis, and Out-of-Control Points.</p>
+          <button class="btn amber" id="btnExport2">Export report (.xlsx)</button>
+          <div class="hint" id="exportHint" style="margin-top:10px;"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Report contents</div>
+          <table style="width:100%;font-size:12px;">
+            <tr><td style="padding:5px 0;width:180px;font-weight:600;">Raw Data</td><td>Every imported row, unmodified.</td></tr>
+            <tr><td style="padding:5px 0;font-weight:600;">Statistical Summary</td><td>n, mean, median, σ, min, max, range, LSL/Target/USL, Cp, Cpk, Cpu, Cpl, sigma method.</td></tr>
+            <tr><td style="padding:5px 0;font-weight:600;">SPC Analysis</td><td>Chart points with CL / UCL / LCL and in-control status.</td></tr>
+            <tr><td style="padding:5px 0;font-weight:600;">CPK Analysis</td><td>Histogram bins and capability indices with method notes.</td></tr>
+            <tr><td style="padding:5px 0;font-weight:600;">Out-of-Control Points</td><td>Every SPC rule violation and spec violation with the statistical signal detected.</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   CONSTANTS
+   ============================================================ */
+// SPC control-chart constants by subgroup size n (2..10)
+var CHART_CONSTANTS = {
+  2:{A2:1.880,D3:0,D4:3.267,d2:1.128},
+  3:{A2:1.023,D3:0,D4:2.574,d2:1.693},
+  4:{A2:0.729,D3:0,D4:2.282,d2:2.059},
+  5:{A2:0.577,D3:0,D4:2.114,d2:2.326},
+  6:{A2:0.483,D3:0,D4:2.004,d2:2.534},
+  7:{A2:0.419,D3:0.076,D4:1.924,d2:2.704},
+  8:{A2:0.373,D3:0.136,D4:1.864,d2:2.847},
+  9:{A2:0.337,D3:0.184,D4:1.816,d2:2.970},
+  10:{A2:0.308,D3:0.223,D4:1.777,d2:3.078}
+};
+var MR_D2 = 1.128; // d2 for moving range of n=2, used for I-MR sigma-hat
+var MR_E2 = 2.66;  // 3/d2 for individuals chart limits
+
+var COLUMN_ALIASES = {
+  sampleNo:["sampleno","sample","sampleid","sno","sampleno.","no","serialno"],
+  date:["date"],
+  time:["time"],
+  partNumber:["partnumber","partno","pn","part"],
+  partName:["partname"],
+  machine:["machine","machineno","machineid","press"],
+  cavity:["cavity","cavityno"],
+  operator:["operator","operatorname","inspector"],
+  lsl:["lsl","lowerspeclimit","lowerspec","lowerlimit"],
+  target:["target","nominal","targetnominal","targetvalue"],
+  usl:["usl","upperspeclimit","upperspec","upperlimit"]
+};
+
+var RULE_DEFS = [
+  {id:"beyondLimit", label:"Beyond control limit", desc:"A single point falls outside the UCL or LCL.", enabled:true, hasN:false},
+  {id:"run", label:"Run on one side of centerline", desc:"N consecutive points fall on the same side of the CL.", enabled:true, hasN:true, n:8},
+  {id:"trend", label:"Trend (consistently increasing/decreasing)", desc:"N consecutive points steadily rise or fall.", enabled:true, hasN:true, n:6},
+  {id:"zoneA", label:"2 of 3 beyond 2σ (Zone A) — Nelson rule", desc:"2 of 3 consecutive points fall beyond the 2-sigma line, same side.", enabled:false, hasN:false}
+];
+
+var RULE_SUGGESTIONS = {
+  beyondLimit:"Investigate for special-cause variation: tooling, material lot, or a measurement/recording error at this point.",
+  run:"Investigate for a sustained process shift — material lot change, setup adjustment, or environmental change.",
+  trend:"Investigate for a gradual drift — tool wear, gauge drift, or an environmental trend.",
+  zoneA:"Investigate for early signs of a process shift before it grows into a run or an out-of-limit point."
+};
+
+/* ============================================================
+   STATE
+   ============================================================ */
+var S = {
+  headers: [],
+  rawRows: [],          // array of objects, all columns as strings/numbers as parsed
+  colMap: {},           // logical field -> actual header name
+  measurementCol: null,
+  charUnit: "",
+  subgroupSize: 5,
+  LSL: null, Target: null, USL: null,
+  sigmaMethod: "within",
+  rules: JSON.parse(JSON.stringify(RULE_DEFS)),
+  validRows: [],         // rows with usable numeric measurement
+  invalidCount: 0,
+  duplicateCount: 0,
+  analysis: null,        // computed results
+  page: 1,
+  pageSize: 50,
+  search: "",
+  abnormalOnly: false,
+  sortCol: null,
+  sortDir: 1,
+  fileName: ""
+};
+
+var charts = {};
+
+/* ============================================================
+   DEMO DATA  — fixed, hand-composed (not random) so it behaves
+   the same way every time: an injection-molded housing diameter,
+   subgroup size 5, with a deliberate late-run upward shift and one
+   point beyond the control limit, to exercise the rule engine.
+   ============================================================ */
+function buildDemoRows(){
+  var vals = [
+    25.01,24.98,25.03,24.99,25.02, 24.97,25.00,25.04,24.96,25.01,
+    25.02,24.99,25.01,25.03,24.98, 25.00,25.02,24.97,25.01,25.03,
+    24.99,25.04,25.00,24.98,25.02, 25.03,25.09,25.01,25.02,25.24,
+    25.04,25.05,25.03,25.06,25.02, 25.05,25.04,25.07,25.03,25.06,
+    25.05,25.08,25.04,25.06,25.09, 25.07,25.05,25.08,25.06,25.09,
+    25.06,25.08,25.10,25.07,25.09, 25.08,25.10,25.07,25.09,25.11
+  ];
+  var machines=["IMM-07","IMM-07","IMM-07","IMM-12"];
+  var cavities=[1,2,3,4];
+  var operators=["R. Alvarez","T. Okafor","S. Lindqvist"];
+  var rows=[];
+  var startDate = new Date(2026,8,1,6,0,0);
+  for(var i=0;i<vals.length;i++){
+    var d = new Date(startDate.getTime() + i*45*60000);
+    rows.push({
+      "Sample No.": i+1,
+      "Date": d.toISOString().slice(0,10),
+      "Time": d.toTimeString().slice(0,5),
+      "Part Number": "HSG-204",
+      "Part Name": "Housing, Outer",
+      "Machine": machines[i%machines.length],
+      "Cavity": cavities[i%cavities.length],
+      "Operator": operators[i%operators.length],
+      "Measurement 1": vals[i],
+      "LSL": 24.85,
+      "Target": 25.00,
+      "USL": 25.15
+    });
+  }
+  return rows;
+}
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+function norm(s){ return String(s==null?"":s).toLowerCase().replace(/[^a-z0-9]/g,""); }
+function isNumeric(v){
+  if(v===null||v===undefined||v==="") return false;
+  if(typeof v==="number") return isFinite(v);
+  var n = Number(String(v).trim());
+  return !isNaN(n) && isFinite(n);
+}
+function toNum(v){ return typeof v==="number" ? v : Number(String(v).trim()); }
+function fmt(n, d){
+  if(n===null||n===undefined||isNaN(n)) return "—";
+  d = d===undefined?4:d;
+  return Number(n).toFixed(d);
+}
+function fmtShort(n,d){
+  if(n===null||n===undefined||isNaN(n)) return "—";
+  d=d===undefined?3:d;
+  return Number(n).toFixed(d).replace(/\.?0+$/,function(m){return m.length>1?"" : m;}) || "0";
+}
+function mean(arr){ return arr.reduce(function(a,b){return a+b;},0)/arr.length; }
+function median(arr){
+  var a=arr.slice().sort(function(x,y){return x-y;}); var n=a.length;
+  return n%2 ? a[(n-1)/2] : (a[n/2-1]+a[n/2])/2;
+}
+function stdevSample(arr){
+  var m=mean(arr); var n=arr.length;
+  if(n<2) return NaN;
+  var ss=arr.reduce(function(a,b){return a+(b-m)*(b-m);},0);
+  return Math.sqrt(ss/(n-1));
+}
+function normalPDF(x,m,sd){ return (1/(sd*Math.sqrt(2*Math.PI))) * Math.exp(-((x-m)*(x-m))/(2*sd*sd)); }
+function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+function el(id){ return document.getElementById(id); }
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+document.querySelectorAll(".navitem").forEach(function(btn){
+  btn.addEventListener("click", function(){ showView(btn.getAttribute("data-view")); });
+});
+function showView(name){
+  document.querySelectorAll(".view").forEach(function(v){ v.classList.remove("active"); });
+  document.querySelectorAll(".navitem").forEach(function(v){ v.classList.remove("active"); });
+  el("view-"+name).classList.add("active");
+  document.querySelector('.navitem[data-view="'+name+'"]').classList.add("active");
+}
+
+/* ============================================================
+   FILE IMPORT
+   ============================================================ */
+var dz = el("dropzone");
+dz.addEventListener("click", function(){ el("fileInput").click(); });
+dz.addEventListener("dragover", function(e){ e.preventDefault(); dz.classList.add("drag"); });
+dz.addEventListener("dragleave", function(){ dz.classList.remove("drag"); });
+dz.addEventListener("drop", function(e){
+  e.preventDefault(); dz.classList.remove("drag");
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+el("fileInput").addEventListener("change", function(e){
+  if(e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function handleFile(file){
+  var okExt = /\.(xlsx|xls)$/i.test(file.name);
+  if(!okExt){
+    el("fileInfo").innerHTML = '<span style="color:var(--red);">Unsupported file type. Please upload a .xlsx or .xls file.</span>';
+    return;
+  }
+  S.fileName = file.name;
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    try{
+      var data = new Uint8Array(ev.target.result);
+      var wb = XLSX.read(data, {type:"array", cellDates:true});
+      var sheetName = wb.SheetNames[0];
+      var sheet = wb.Sheets[sheetName];
+      var json = XLSX.utils.sheet_to_json(sheet, {defval:""});
+      if(!json.length){
+        el("fileInfo").innerHTML = '<span style="color:var(--red);">This sheet appears to be empty.</span>';
+        return;
+      }
+      ingestRows(json, file.name, sheetName);
+    }catch(err){
+      el("fileInfo").innerHTML = '<span style="color:var(--red);">Could not read this file: '+escapeHtml(err.message||err)+'</span>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function ingestRows(rows, fileLabel, sheetName){
+  S.rawRows = rows;
+  S.headers = Object.keys(rows[0]);
+  S.colMap = detectColumns(S.headers);
+  el("fileInfo").innerHTML = 'Loaded <strong>'+escapeHtml(fileLabel||"demo dataset")+'</strong>'+(sheetName?' — sheet "'+escapeHtml(sheetName)+'"':'')+' · '+rows.length+' rows · '+S.headers.length+' columns.';
+  el("dzTitle").textContent = "File loaded — drop another to replace it";
+  renderPreview();
+  populateMeasurementOptions();
+  prefillSpec();
+  renderRuleConfig();
+  el("previewPanel").style.display="";
+  el("mapPanel").style.display="";
+  el("specPanel").style.display="";
+  el("rulesPanel").style.display="";
+  el("validationPanel").style.display="";
+  setStep(2);
+  runValidation();
+  el("btnAnalyze").disabled = false;
+  showView("import");
+}
+
+function detectColumns(headers){
+  var map = {};
+  headers.forEach(function(h){
+    var n = norm(h);
+    Object.keys(COLUMN_ALIASES).forEach(function(field){
+      if(map[field]) return;
+      if(COLUMN_ALIASES[field].indexOf(n) !== -1) map[field]=h;
+    });
+  });
+  return map;
+}
+
+function renderPreview(){
+  var thead = document.querySelector("#previewTable thead");
+  var tbody = document.querySelector("#previewTable tbody");
+  thead.innerHTML = "<tr>"+S.headers.map(function(h){return "<th>"+escapeHtml(h)+"</th>";}).join("")+"</tr>";
+  var rowsToShow = S.rawRows.slice(0,12);
+  tbody.innerHTML = rowsToShow.map(function(r){
+    return "<tr>"+S.headers.map(function(h){return "<td>"+escapeHtml(r[h])+"</td>";}).join("")+"</tr>";
+  }).join("");
+  el("previewMeta").textContent = "showing "+rowsToShow.length+" of "+S.rawRows.length+" rows";
+}
+
+function populateMeasurementOptions(){
+  var sel = el("selMeasurement");
+  // candidate columns: numeric across majority of rows
+  var candidates = S.headers.filter(function(h){
+    var numericCount = 0, checked = 0;
+    for(var i=0;i<Math.min(S.rawRows.length,30);i++){
+      var v = S.rawRows[i][h];
+      if(v==="" || v==null) continue;
+      checked++;
+      if(isNumeric(v)) numericCount++;
+    }
+    return checked>0 && numericCount/checked > 0.6;
+  }).filter(function(h){
+    return h !== S.colMap.lsl && h !== S.colMap.target && h !== S.colMap.usl && h !== S.colMap.sampleNo && h !== S.colMap.cavity;
+  });
+  sel.innerHTML = candidates.map(function(h){return '<option value="'+escapeHtml(h)+'">'+escapeHtml(h)+"</option>";}).join("");
+  // prefer a column literally named "Measurement 1"
+  var preferred = candidates.find(function(h){ return /measurement\s*1\b/i.test(h); }) || candidates[0];
+  if(preferred){ sel.value = preferred; S.measurementCol = preferred; }
+  sel.onchange = function(){ S.measurementCol = sel.value; runValidation(); };
+  if(!el("selCharUnit").value) el("selCharUnit").value = S.measurementCol ? "" : "";
+}
+
+function prefillSpec(){
+  function firstNumericVal(colKey){
+    var col = S.colMap[colKey];
+    if(!col) return "";
+    for(var i=0;i<S.rawRows.length;i++){
+      var v = S.rawRows[i][col];
+      if(isNumeric(v)) return toNum(v);
+    }
+    return "";
+  }
+  el("inLSL").value = firstNumericVal("lsl");
+  el("inTarget").value = firstNumericVal("target");
+  el("inUSL").value = firstNumericVal("usl");
+}
+
+function renderRuleConfig(){
+  var wrap = el("ruleConfigList");
+  wrap.innerHTML = S.rules.map(function(r,idx){
+    return '<div class="rule-toggle">'+
+      '<div><div class="name">'+escapeHtml(r.label)+'</div><div class="desc">'+escapeHtml(r.desc)+'</div></div>'+
+      '<div style="display:flex;align-items:center;gap:8px;">'+
+      (r.hasN ? '<input type="number" class="rule-n" min="3" max="15" value="'+r.n+'" data-rule-n="'+idx+'"> pts' : '')+
+      '<label class="checkline" style="margin:0;"><input type="checkbox" data-rule-idx="'+idx+'" '+(r.enabled?'checked':'')+'></label>'+
+      '</div></div>';
+  }).join("");
+  wrap.querySelectorAll("[data-rule-idx]").forEach(function(cb){
+    cb.addEventListener("change", function(){ S.rules[+cb.getAttribute("data-rule-idx")].enabled = cb.checked; });
+  });
+  wrap.querySelectorAll("[data-rule-n]").forEach(function(inp){
+    inp.addEventListener("change", function(){ S.rules[+inp.getAttribute("data-rule-n")].n = Math.max(3, parseInt(inp.value,10)||3); });
+  });
+}
+
+function setStep(n){
+  document.querySelectorAll(".step").forEach(function(s){
+    var stepNo = +s.getAttribute("data-step");
+    s.classList.remove("done","current");
+    if(stepNo < n) s.classList.add("done");
+    if(stepNo === n) s.classList.add("current");
+  });
+}
+
+/* ============================================================
+   VALIDATION
+   ============================================================ */
+function runValidation(){
+  var out = { errors:[], warnings:[] };
+  S.LSL = el("inLSL").value===""?null:toNum(el("inLSL").value);
+  S.Target = el("inTarget").value===""?null:toNum(el("inTarget").value);
+  S.USL = el("inUSL").value===""?null:toNum(el("inUSL").value);
+  S.subgroupSize = parseInt(el("selSubgroup").value,10);
+  S.sigmaMethod = el("selSigma").value;
+  S.charUnit = el("selCharUnit").value.trim();
+
+  if(!S.measurementCol){ out.errors.push("No measurement column selected."); }
+
+  var valid=[], invalidCount=0, seen={}, dupCount=0;
+  S.rawRows.forEach(function(row, idx){
+    var raw = S.measurementCol ? row[S.measurementCol] : undefined;
+    var empty = (raw===""||raw===null||raw===undefined);
+    var numericOk = !empty && isNumeric(raw);
+    if(empty || !numericOk){ invalidCount++; return; }
+    var key = (row[S.colMap.sampleNo]||"")+"|"+(row[S.colMap.date]||"")+"|"+(row[S.colMap.time]||"")+"|"+toNum(raw);
+    if(seen[key]) dupCount++; else seen[key]=true;
+    valid.push({ _idx: idx, _row: row, value: toNum(raw) });
+  });
+  S.validRows = valid;
+  S.invalidCount = invalidCount;
+  S.duplicateCount = dupCount;
+
+  if(invalidCount>0) out.warnings.push(invalidCount+" row(s) skipped: empty or non-numeric measurement value.");
+  if(dupCount>0) out.warnings.push(dupCount+" possible duplicate record(s) detected (matching sample/date/time/value).");
+
+  if(S.LSL===null || S.USL===null){
+    out.errors.push("LSL and USL must both be provided before Cp/Cpk can be calculated.");
+  } else if(S.USL <= S.LSL){
+    out.errors.push("USL ("+S.USL+") must be greater than LSL ("+S.LSL+"). Cp/Cpk cannot be calculated until this is corrected.");
+  }
+  if(!S.subgroupSize || S.subgroupSize<1 || S.subgroupSize>10){
+    out.errors.push("Subgroup size must be between 1 and 10.");
+  }
+  var minNeeded = S.subgroupSize>1 ? S.subgroupSize*2 : 2;
+  if(valid.length < minNeeded){
+    out.errors.push("At least "+minNeeded+" valid observations are needed for the selected subgroup size (found "+valid.length+").");
+  }
+
+  renderValidation(out);
+  el("btnAnalyze").disabled = out.errors.length>0;
+  return out;
+}
+
+function renderValidation(out){
+  var html = "";
+  if(out.errors.length){
+    html += '<div class="banner err"><strong>Cannot analyze — fix the following:</strong><ul>'+out.errors.map(function(e){return "<li>"+escapeHtml(e)+"</li>";}).join("")+"</ul></div>";
+  }
+  if(out.warnings.length){
+    html += '<div class="banner warn"><strong>Data notes:</strong><ul>'+out.warnings.map(function(e){return "<li>"+escapeHtml(e)+"</li>";}).join("")+"</ul></div>";
+  }
+  if(!out.errors.length && !out.warnings.length){
+    html = '<div class="banner ok">'+S.validRows.length+' valid observations. Ready to analyze.</div>';
+  } else if(!out.errors.length){
+    html += '<div class="banner ok">'+S.validRows.length+' valid observations ready for analysis.</div>';
+  }
+  el("validationOutput").innerHTML = html;
+}
+
+["inLSL","inTarget","inUSL","selSubgroup","selSigma","selCharUnit"].forEach(function(id){
+  el(id).addEventListener("input", runValidation);
+  el(id).addEventListener("change", runValidation);
+});
+
+/* ============================================================
+   DEMO BUTTON
+   ============================================================ */
+function loadDemo(){
+  ingestRows(buildDemoRows(), "", "Demo Sheet");
+  el("selCharUnit").value = "Housing Diameter, mm";
+  runValidation();
+}
+el("btnDemo").addEventListener("click", loadDemo);
+el("btnDemo2").addEventListener("click", loadDemo);
+
+/* ============================================================
+   ANALYSIS
+   ============================================================ */
+el("btnAnalyze").addEventListener("click", function(){
+  var v = runValidation();
+  if(v.errors.length){ showView("import"); return; }
+  S.analysis = computeAnalysis();
+  renderAll();
+  el("btnExport").disabled = false;
+  showView("dashboard");
+});
+
+function computeAnalysis(){
+  var values = S.validRows.map(function(r){ return r.value; });
+  var n = values.length;
+  var overallMean = mean(values);
+  var med = median(values);
+  var sd = stdevSample(values);
+  var min = Math.min.apply(null, values);
+  var max = Math.max.apply(null, values);
+  var range = max - min;
+
+  var chartType, primaryPoints, secondaryPoints, sigmaWithin, cc;
+  if(S.subgroupSize === 1){
+    chartType = "IMR";
+    var mrs = [];
+    for(var i=1;i<values.length;i++) mrs.push(Math.abs(values[i]-values[i-1]));
+    var mrBar = mean(mrs);
+    sigmaWithin = mrBar / MR_D2;
+    var iCL = overallMean, iUCL = overallMean + MR_E2*mrBar, iLCL = overallMean - MR_E2*mrBar;
+    var mrCL = mrBar, mrUCL = 3.267*mrBar, mrLCL = 0;
+    primaryPoints = values.map(function(v,idx){ return { index: idx+1, value: v, CL:iCL, UCL:iUCL, LCL:iLCL }; });
+    secondaryPoints = mrs.map(function(v,idx){ return { index: idx+2, value: v, CL:mrCL, UCL:mrUCL, LCL:mrLCL }; });
+  } else {
+    chartType = "XbarR";
+    cc = CHART_CONSTANTS[S.subgroupSize];
+    var subgroups = [];
+    for(var s=0; s+S.subgroupSize<=values.length; s+=S.subgroupSize){
+      var chunk = values.slice(s, s+S.subgroupSize);
+      subgroups.push({ mean: mean(chunk), range: Math.max.apply(null,chunk)-Math.min.apply(null,chunk), values: chunk });
+    }
+    var xbarbar = mean(subgroups.map(function(g){return g.mean;}));
+    var rbar = mean(subgroups.map(function(g){return g.range;}));
+    sigmaWithin = rbar / cc.d2;
+    var xCL=xbarbar, xUCL=xbarbar+cc.A2*rbar, xLCL=xbarbar-cc.A2*rbar;
+    var rCL=rbar, rUCL=cc.D4*rbar, rLCL=cc.D3*rbar;
+    primaryPoints = subgroups.map(function(g,idx){ return { index: idx+1, value: g.mean, CL:xCL, UCL:xUCL, LCL:xLCL }; });
+    secondaryPoints = subgroups.map(function(g,idx){ return { index: idx+1, value: g.range, CL:rCL, UCL:rUCL, LCL:rLCL }; });
+  }
+
+  var sigmaForCpk = S.sigmaMethod === "overall" ? sd : sigmaWithin;
+  var cp=null, cpu=null, cpl=null, cpk=null;
+  if(S.LSL!=null && S.USL!=null && S.USL>S.LSL && sigmaForCpk>0){
+    cp = (S.USL - S.LSL) / (6*sigmaForCpk);
+    cpu = (S.USL - overallMean) / (3*sigmaForCpk);
+    cpl = (overallMean - S.LSL) / (3*sigmaForCpk);
+    cpk = Math.min(cpu, cpl);
+  }
+
+  var violations = detectViolations(primaryPoints, chartType);
+  var specViolations = S.validRows.filter(function(r){
+    return (S.LSL!=null && r.value < S.LSL) || (S.USL!=null && r.value > S.USL);
+  }).map(function(r){
+    return { row: r._row, value: r.value, type: r.value < S.LSL ? "Below LSL" : "Above USL" };
+  });
+
+  return {
+    n:n, mean:overallMean, median:med, stdev:sd, min:min, max:max, range:range,
+    sigmaWithin: sigmaWithin, sigmaForCpk: sigmaForCpk,
+    cp:cp, cpu:cpu, cpl:cpl, cpk:cpk,
+    chartType: chartType, primaryPoints: primaryPoints, secondaryPoints: secondaryPoints,
+    violations: violations, specViolations: specViolations
+  };
+}
+
+function detectViolations(points, chartType){
+  var viol = [];
+  var sigmaChart = null;
+  if(points.length){
+    var p0 = points[0];
+    sigmaChart = (p0.UCL - p0.CL) / 3;
+  }
+  var ruleEnabled = {};
+  S.rules.forEach(function(r){ ruleEnabled[r.id] = r; });
+
+  // Rule 1: beyond limit
+  if(ruleEnabled.beyondLimit.enabled){
+    points.forEach(function(p){
+      if(p.value > p.UCL || p.value < p.LCL){
+        viol.push({ index:p.index, rule:"Beyond control limit", value:p.value, limit: p.value>p.UCL?p.UCL:p.LCL, suggestion: RULE_SUGGESTIONS.beyondLimit });
+      }
+    });
+  }
+  // Rule 2: run of N on one side
+  if(ruleEnabled.run.enabled){
+    var N = ruleEnabled.run.n;
+    var side = 0, count = 0;
+    points.forEach(function(p, idx){
+      var s = p.value > p.CL ? 1 : (p.value < p.CL ? -1 : 0);
+      if(s !== 0 && s === side){ count++; } else { side = s; count = s===0?0:1; }
+      if(count === N){
+        viol.push({ index:p.index, rule:"Run of "+N+" ("+(side>0?"above":"below")+" centerline)", value:p.value, limit: p.CL, suggestion: RULE_SUGGESTIONS.run });
+      }
+    });
+  }
+  // Rule 3: trend of N increasing/decreasing
+  if(ruleEnabled.trend.enabled){
+    var Nt = ruleEnabled.trend.n;
+    var dir = 0, streak = 1;
+    for(var i=1;i<points.length;i++){
+      var d = points[i].value > points[i-1].value ? 1 : (points[i].value < points[i-1].value ? -1 : 0);
+      if(d !== 0 && d === dir){ streak++; } else { dir = d; streak = d===0?1:2; }
+      if(streak === Nt){
+        viol.push({ index:points[i].index, rule:"Trend of "+Nt+" ("+(dir>0?"increasing":"decreasing")+")", value:points[i].value, limit: dir>0?points[i].UCL:points[i].LCL, suggestion: RULE_SUGGESTIONS.trend });
+      }
+    }
+  }
+  // Rule 4: 2 of 3 beyond 2-sigma zone A, same side
+  if(ruleEnabled.zoneA.enabled && sigmaChart){
+    for(var j=2;j<points.length;j++){
+      var win = [points[j-2], points[j-1], points[j]];
+      ["above","below"].forEach(function(dirn){
+        var cnt = win.filter(function(p){
+          var lim2 = dirn==="above" ? p.CL + 2*sigmaChart : p.CL - 2*sigmaChart;
+          return dirn==="above" ? p.value > lim2 : p.value < lim2;
+        }).length;
+        if(cnt>=2){
+          viol.push({ index:points[j].index, rule:"2 of 3 beyond 2σ (Zone A, "+dirn+")", value:points[j].value, limit: dirn==="above" ? points[j].CL+2*sigmaChart : points[j].CL-2*sigmaChart, suggestion: RULE_SUGGESTIONS.zoneA });
+        }
+      });
+    }
+  }
+  // de-dupe identical (index+rule) entries
+  var uniq = {}; var result=[];
+  viol.forEach(function(v){ var k=v.index+"|"+v.rule; if(!uniq[k]){ uniq[k]=true; result.push(v); } });
+  result.sort(function(a,b){ return a.index-b.index; });
+  return result;
+}
+
+/* ============================================================
+   RENDERING — DASHBOARD / KPI / STATUS
+   ============================================================ */
+function renderAll(){
+  var A = S.analysis;
+  el("dashEmpty").style.display="none"; el("dashContent").style.display="";
+  el("spcEmpty").style.display="none"; el("spcContent").style.display="";
+  el("cpkEmpty").style.display="none"; el("cpkContent").style.display="";
+  el("dataEmpty").style.display="none"; el("dataContentWrap").style.display="";
+  el("reportsEmpty").style.display="none"; el("reportsContent").style.display="";
+
+  var partName = (S.colMap.partName && S.rawRows[0][S.colMap.partName]) || "";
+  var partNumber = (S.colMap.partNumber && S.rawRows[0][S.colMap.partNumber]) || "";
+  el("topPartName").textContent = (partName||partNumber) ? (partName||"Part") + (partNumber? " · "+partNumber:"") : "SPC & Process Capability Analyzer";
+  el("topSubline").textContent = (S.charUnit||S.measurementCol) + " · n="+A.n+" · subgroup "+S.subgroupSize+ " · " + (S.fileName||"demo dataset");
+
+  var status = A.violations.length===0 && A.specViolations.length===0;
+  var rs = el("railStatus");
+  rs.className = "rail-status " + (status?"ok":"bad");
+  rs.innerHTML = "<span class=\"dot\"></span>" + (status? "IN CONTROL":"SIGNALS DETECTED");
+
+  renderKpiStrip();
+  renderCharts();
+  renderCpkPanels();
+  renderViolationTables();
+  renderDataTables(true);
+  renderStatsTable();
+  renderMethodNotes();
+  el("exportHint").textContent = "";
+}
+
+function kpiClass(name, A){
+  if(name==="cpk"){ if(A.cpk==null) return "neutral"; return A.cpk>=1.33?"green":(A.cpk>=1.0?"amber":"red"); }
+  if(name==="oos"){ return (A.violations.length+A.specViolations.length)>0 ? "red" : "green"; }
+  return "blue";
+}
+
+function renderKpiStrip(){
+  var A = S.analysis;
+  var items = [
+    {label:"PROCESS MEAN", value:fmt(A.mean,4), unit:S.charUnit, cls:"blue"},
+    {label:"STD DEVIATION", value:fmt(A.sigmaForCpk,4), unit:"("+(S.sigmaMethod==="within"?"within":"overall")+")", cls:"blue"},
+    {label:"CP", value:A.cp==null?"—":fmt(A.cp,2), unit:"", cls: A.cp==null?"neutral":(A.cp>=1.33?"green":(A.cp>=1?"amber":"red"))},
+    {label:"CPK", value:A.cpk==null?"—":fmt(A.cpk,2), unit:"", cls: kpiClass("cpk",A)},
+    {label:"USL", value: S.USL==null?"—":fmt(S.USL,3), unit:"", cls:"amber"},
+    {label:"LSL", value: S.LSL==null?"—":fmt(S.LSL,3), unit:"", cls:"amber"},
+    {label:"OBSERVATIONS", value: A.n, unit:"", cls:"blue"},
+    {label:"OUT-OF-CONTROL PTS", value: A.violations.length, unit:"", cls: kpiClass("oos",A)}
+  ];
+  el("kpiStrip").innerHTML = items.map(function(k){
+    return '<div class="kpi '+k.cls+'"><div class="kpi-label">'+k.label+'</div><div class="kpi-value">'+k.value+'<span class="kpi-unit">'+escapeHtml(k.unit)+'</span></div></div>';
+  }).join("");
+}
+
+/* ============================================================
+   CHARTS
+   ============================================================ */
+function destroyChart(name){ if(charts[name]){ charts[name].destroy(); charts[name]=null; } }
+
+function pointColors(points){
+  return points.map(function(p){
+    if(p.value>p.UCL || p.value<p.LCL) return getCss('--red');
+    return getCss('--blue');
+  });
+}
+function getCss(varName){ return getComputedStyle(document.documentElement).getPropertyValue(varName).trim(); }
+
+function lineDataset(label, points, key, color, dashed){
+  return {
+    label: label,
+    data: points.map(function(p){ return p[key]; }),
+    borderColor: color, borderWidth: 1.4,
+    borderDash: dashed?[5,3]:[],
+    pointRadius: 0, fill:false, tension:0
+  };
+}
+
+function buildSpcChart(canvasId, points, title, labelPrefix){
+  var ctx = el(canvasId).getContext("2d");
+  var labels = points.map(function(p){ return String(p.index); });
+  var colors = pointColors(points);
+  return new Chart(ctx, {
+    type:"line",
+    data:{ labels: labels, datasets:[
+      { label: title, data: points.map(function(p){return p.value;}), borderColor: getCss('--steel-soft'), borderWidth:1.2,
+        pointRadius:3.5, pointBackgroundColor: colors, pointBorderColor: colors, tension:0 },
+      lineDataset("CL", points, "CL", getCss('--green'), false),
+      lineDataset("UCL", points, "UCL", getCss('--red'), true),
+      lineDataset("LCL", points, "LCL", getCss('--red'), true)
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      animation:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{
+        label:function(c){ return c.dataset.label+": "+Number(c.raw).toFixed(4); }
+      }}},
+      scales:{
+        x:{ title:{display:true,text:labelPrefix+" number", color:getCss('--steel')}, ticks:{color:getCss('--steel'),maxTicksLimit:15}, grid:{color:getCss('--grid')} },
+        y:{ ticks:{color:getCss('--steel')}, grid:{color:getCss('--grid')} }
+      }
+    }
+  });
+}
+
+function buildSecondaryChart(canvasId, points, title){
+  var ctx = el(canvasId).getContext("2d");
+  var labels = points.map(function(p){ return String(p.index); });
+  return new Chart(ctx, {
+    type:"line",
+    data:{ labels: labels, datasets:[
+      { label:title, data: points.map(function(p){return p.value;}), borderColor: getCss('--blue'), borderWidth:1.2, pointRadius:2.5, tension:0 },
+      lineDataset("CL", points, "CL", getCss('--green'), false),
+      lineDataset("UCL", points, "UCL", getCss('--red'), true),
+      lineDataset("LCL", points, "LCL", getCss('--red'), true)
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{ legend:{display:false} },
+      scales:{ x:{ ticks:{color:getCss('--steel'),maxTicksLimit:15}, grid:{color:getCss('--grid')} }, y:{ ticks:{color:getCss('--steel')}, grid:{color:getCss('--grid')} } }
+    }
+  });
+}
+
+function buildHistogram(canvasId){
+  var A = S.analysis;
+  var values = S.validRows.map(function(r){return r.value;});
+  var binCount = Math.max(6, Math.min(14, Math.round(Math.sqrt(values.length))));
+  var lo = Math.min(A.min, S.LSL!=null?S.LSL:A.min);
+  var hi = Math.max(A.max, S.USL!=null?S.USL:A.max);
+  var pad = (hi-lo)*0.06 || 0.01;
+  lo -= pad; hi += pad;
+  var width = (hi-lo)/binCount;
+  var bins = new Array(binCount).fill(0);
+  values.forEach(function(v){
+    var idx = Math.min(binCount-1, Math.max(0, Math.floor((v-lo)/width)));
+    bins[idx]++;
+  });
+  var binLabels = bins.map(function(_,i){ return (lo+i*width).toFixed(3); });
+  var maxBin = Math.max.apply(null,bins);
+  var curve = binLabels.map(function(_,i){
+    var x = lo + (i+0.5)*width;
+    return normalPDF(x, A.mean, A.stdev) * values.length * width;
+  });
+
+  var ctx = el(canvasId).getContext("2d");
+  var annotations = [];
+  return new Chart(ctx, {
+    data:{
+      labels: binLabels,
+      datasets:[
+        { type:"bar", label:"Observations", data: bins, backgroundColor: getCss('--blue-soft'), borderColor:getCss('--blue'), borderWidth:1 },
+        { type:"line", label:"Normal reference", data: curve, borderColor: getCss('--steel'), borderWidth:1.5, pointRadius:0, tension:.35, borderDash:[2,2] }
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{ legend:{display:false} },
+      scales:{
+        x:{ title:{display:true,text:S.charUnit||"value", color:getCss('--steel')}, ticks:{color:getCss('--steel'),maxTicksLimit:8}, grid:{display:false} },
+        y:{ ticks:{color:getCss('--steel')}, grid:{color:getCss('--grid')}, title:{display:true,text:"count",color:getCss('--steel')} }
+      }
+    },
+    plugins:[{
+      id:"specLines",
+      afterDraw:function(chart){
+        var yA = chart.scales.y, xA = chart.scales.x;
+        var ctx2 = chart.ctx;
+        function drawVLine(value, color, label){
+          if(value==null) return;
+          // find pixel position by mapping value onto category axis
+          var frac = (value-lo)/(hi-lo);
+          var xPix = xA.left + frac*(xA.right-xA.left);
+          ctx2.save();
+          ctx2.strokeStyle = color; ctx2.lineWidth=1.6; ctx2.setLineDash([4,3]);
+          ctx2.beginPath(); ctx2.moveTo(xPix, yA.top); ctx2.lineTo(xPix, yA.bottom); ctx2.stroke();
+          ctx2.setLineDash([]);
+          ctx2.fillStyle = color; ctx2.font="600 10px "+getCss('--disp')||"sans-serif";
+          ctx2.fillText(label, xPix+3, yA.top+10);
+          ctx2.restore();
+        }
+        drawVLine(S.LSL, getCss('--amber'), "LSL");
+        drawVLine(S.USL, getCss('--amber'), "USL");
+        drawVLine(S.Target, getCss('--steel'), "TGT");
+        drawVLine(A.mean, getCss('--blue'), "x̄");
+      }
+    }]
+  });
+}
+
+function renderCharts(){
+  var A = S.analysis;
+  destroyChart("spcMain"); destroyChart("spcSecondary"); destroyChart("histoMini");
+  destroyChart("spcPrimaryFull"); destroyChart("spcSecondaryFull"); destroyChart("histoFull");
+
+  var isIMR = A.chartType === "IMR";
+  var primaryLabel = isIMR ? "Individual value" : "Subgroup mean (X̄)";
+  var secondaryLabel = isIMR ? "Moving range" : "Subgroup range (R)";
+  var xLabel = isIMR ? "Sample" : "Subgroup";
+
+  charts.spcMain = buildSpcChart("chartSpcMain", A.primaryPoints, primaryLabel, xLabel);
+  charts.spcSecondary = buildSecondaryChart("chartSpcSecondary", A.secondaryPoints, secondaryLabel);
+  charts.spcPrimaryFull = buildSpcChart("chartSpcPrimaryFull", A.primaryPoints, primaryLabel, xLabel);
+  charts.spcSecondaryFull = buildSecondaryChart("chartSpcSecondaryFull", A.secondaryPoints, secondaryLabel);
+  charts.histoMini = buildHistogram("chartHistoMini");
+  charts.histoFull = buildHistogram("chartHistoFull");
+
+  el("spcChartMeta").textContent = (isIMR ? "Individuals–Moving Range (I-MR)" : "X\u0304 / R chart, n="+S.subgroupSize);
+  el("spcTitleMeta").textContent = el("spcChartMeta").textContent;
+  el("spcSecondaryTitle").textContent = isIMR ? "Moving Range (MR) chart" : "Range (R) chart";
+
+  var legendHtml = '<span><span class="sw dot" style="background:'+getCss('--blue')+';"></span>in control</span>'+
+    '<span><span class="sw dot" style="background:'+getCss('--red')+';"></span>beyond control limit</span>'+
+    '<span><span class="sw" style="background:'+getCss('--green')+';"></span>centerline (CL)</span>'+
+    '<span><span class="sw" style="background:'+getCss('--red')+';border-top:2px dashed '+getCss('--red')+';height:0;"></span>UCL / LCL</span>';
+  el("spcLegend").innerHTML = legendHtml;
+  el("spcLegendFull").innerHTML = legendHtml;
+
+  var histLegend = '<span><span class="sw" style="background:'+getCss('--blue')+';"></span>observed distribution</span>'+
+    '<span><span class="sw" style="background:'+getCss('--steel')+';"></span>normal reference</span>'+
+    '<span><span class="sw" style="background:'+getCss('--amber')+';"></span>LSL / USL</span>'+
+    '<span><span class="sw" style="background:'+getCss('--blue')+';"></span>mean (x̄)</span>';
+  el("histLegendMini").innerHTML = histLegend;
+  el("histLegendFull").innerHTML = histLegend;
+}
+
+/* ============================================================
+   CPK PANELS
+   ============================================================ */
+function cpkRatingBadge(v){
+  if(v==null) return '<span class="badge neutral">not calculated</span>';
+  if(v>=1.33) return '<span class="badge ok">'+fmt(v,2)+'</span>';
+  if(v>=1.0) return '<span class="badge warn">'+fmt(v,2)+'</span>';
+  return '<span class="badge bad">'+fmt(v,2)+'</span>';
+}
+function cpkPanelHtml(){
+  var A = S.analysis;
+  return '<div class="kpi-strip" style="grid-template-columns:repeat(4,1fr);margin-bottom:10px;">'+
+    '<div class="kpi blue"><div class="kpi-label">CP</div><div class="kpi-value">'+(A.cp==null?"—":fmt(A.cp,3))+'</div></div>'+
+    '<div class="kpi '+kpiClass("cpk",A)+'"><div class="kpi-label">CPK</div><div class="kpi-value">'+(A.cpk==null?"—":fmt(A.cpk,3))+'</div></div>'+
+    '<div class="kpi blue"><div class="kpi-label">CPU</div><div class="kpi-value">'+(A.cpu==null?"—":fmt(A.cpu,3))+'</div></div>'+
+    '<div class="kpi blue"><div class="kpi-label">CPL</div><div class="kpi-value">'+(A.cpl==null?"—":fmt(A.cpl,3))+'</div></div>'+
+    '</div>'+
+    '<table style="width:100%;font-size:12px;">'+
+    '<tr><td style="padding:4px 0;">Mean</td><td style="text-align:right;font-weight:600;">'+fmt(A.mean,4)+'</td></tr>'+
+    '<tr><td style="padding:4px 0;">σ used for capability ('+(S.sigmaMethod==="within"?"within-subgroup":"overall")+')</td><td style="text-align:right;font-weight:600;">'+fmt(A.sigmaForCpk,4)+'</td></tr>'+
+    '<tr><td style="padding:4px 0;">LSL / Target / USL</td><td style="text-align:right;font-weight:600;">'+fmt(S.LSL,3)+' / '+fmt(S.Target,3)+' / '+fmt(S.USL,3)+'</td></tr>'+
+    '<tr><td style="padding:4px 0;">Capability rating (Cpk)</td><td style="text-align:right;">'+cpkRatingBadge(A.cpk)+'</td></tr>'+
+    '</table>'+
+    '<div class="hint" style="margin-top:8px;">Rating shown for reference only against commonly used thresholds (≥1.33 capable, 1.00–1.33 marginal, &lt;1.00 not capable). This is not an automatic pass/fail judgment — review the numerical values against your own acceptance criteria.</div>';
+}
+function renderCpkPanels(){
+  el("cpkMiniPanel").innerHTML = cpkPanelHtml();
+  el("cpkFullPanel").innerHTML = cpkPanelHtml();
+}
+
+/* ============================================================
+   VIOLATION TABLES
+   ============================================================ */
+function violationRowsHtml(list){
+  if(!list.length) return '<tr><td colspan="5" style="text-align:center;color:var(--steel);padding:16px;">No SPC rule violations detected.</td></tr>';
+  return list.map(function(v){
+    return "<tr><td>"+v.index+"</td><td>"+escapeHtml(v.rule)+"</td><td class=\"viol-value\">"+fmt(v.value,4)+"</td><td>"+fmt(v.limit,4)+"</td><td>"+escapeHtml(v.suggestion)+"</td></tr>";
+  }).join("");
+}
+function renderViolationTables(){
+  var A = S.analysis;
+  var head = "<tr><th>Point #</th><th>Rule violated</th><th>Value</th><th>Limit</th><th>Suggested area for investigation</th></tr>";
+  document.querySelector("#violTableMini thead").innerHTML = head;
+  document.querySelector("#violTableMini tbody").innerHTML = violationRowsHtml(A.violations.slice(0,8));
+  document.querySelector("#violTableFull thead").innerHTML = head;
+  document.querySelector("#violTableFull tbody").innerHTML = violationRowsHtml(A.violations);
+  el("violCountMeta").textContent = A.violations.length+" signal(s)";
+  el("violCountMeta2").textContent = A.violations.length+" signal(s)";
+}
+
+/* ============================================================
+   STATS TABLE + METHOD NOTES
+   ============================================================ */
+function renderStatsTable(){
+  var A = S.analysis;
+  var rows = [
+    ["Observations (n)", A.n],
+    ["Mean", fmt(A.mean,4)],
+    ["Median", fmt(A.median,4)],
+    ["Standard deviation (overall, sample)", fmt(A.stdev,4)],
+    ["Standard deviation (within-subgroup estimate)", fmt(A.sigmaWithin,4)],
+    ["Minimum", fmt(A.min,4)],
+    ["Maximum", fmt(A.max,4)],
+    ["Range", fmt(A.range,4)],
+    ["LSL", S.LSL==null?"—":fmt(S.LSL,4)],
+    ["Target", S.Target==null?"—":fmt(S.Target,4)],
+    ["USL", S.USL==null?"—":fmt(S.USL,4)],
+    ["Cp", A.cp==null?"—":fmt(A.cp,4)],
+    ["Cpk", A.cpk==null?"—":fmt(A.cpk,4)],
+    ["Cpu", A.cpu==null?"—":fmt(A.cpu,4)],
+    ["Cpl", A.cpl==null?"—":fmt(A.cpl,4)]
+  ];
+  document.querySelector("#statsTable tbody").innerHTML = rows.map(function(r){
+    return "<tr><td>"+r[0]+"</td><td style=\"font-weight:600;\">"+r[1]+"</td></tr>";
+  }).join("");
+}
+function renderMethodNotes(){
+  var A = S.analysis;
+  var isIMR = A.chartType==="IMR";
+  var note = '<p style="margin-top:0;">Capability indices use <strong>'+(S.sigmaMethod==="within"?"within-subgroup":"overall sample")+' standard deviation</strong> (σ = '+fmt(A.sigmaForCpk,4)+'), computed as follows:</p>'+
+  (isIMR
+    ? '<div class="formula">σ̂ = MR̄ / d2&nbsp;&nbsp;(d2 = 1.128 for a moving range of 2)</div>'
+    : '<div class="formula">σ̂ = R̄ / d2&nbsp;&nbsp;(d2 = '+CHART_CONSTANTS[S.subgroupSize].d2+' for subgroup size '+S.subgroupSize+')</div>')+
+  '<p>'+
+  '<span class="formula">Cp = (USL − LSL) / (6σ)</span> &nbsp; '+
+  '<span class="formula">Cpu = (USL − x̄) / (3σ)</span> &nbsp; '+
+  '<span class="formula">Cpl = (x̄ − LSL) / (3σ)</span> &nbsp; '+
+  '<span class="formula">Cpk = MIN(Cpu, Cpl)</span></p>'+
+  '<p class="hint">Control limits (CL / UCL / LCL) are calculated purely from the process data using standard SPC constants and are never derived from the specification limits (LSL/USL), which come from product requirements. Cpk is only reported once LSL, USL, and a valid σ estimate are all available.</p>';
+  el("spcMethodNote").innerHTML = note;
+  el("methodDetail").innerHTML = note;
+}
+
+/* ============================================================
+   DATA TABLE (mini preview + full sortable/searchable/paginated)
+   ============================================================ */
+function annotatedRows(){
+  var A = S.analysis;
+  var violByIdx = {};
+  // map subgroup/individual point index back to row indices for flagging
+  if(A.chartType==="IMR"){
+    S.validRows.forEach(function(r, i){ if(A.primaryPoints[i] && (A.primaryPoints[i].value>A.primaryPoints[i].UCL || A.primaryPoints[i].value<A.primaryPoints[i].LCL)) violByIdx[r._idx]=true; });
+  } else {
+    var n = S.subgroupSize;
+    A.primaryPoints.forEach(function(p, gi){
+      var oob = p.value>p.UCL || p.value<p.LCL;
+      if(oob){
+        for(var k=0;k<n;k++){ var rr = S.validRows[gi*n+k]; if(rr) violByIdx[rr._idx]=true; }
+      }
+    });
+  }
+  return S.rawRows.map(function(row, idx){
+    var vr = S.validRows.find(function(r){ return r._idx===idx; });
+    var oos = vr && ((S.LSL!=null && vr.value<S.LSL) || (S.USL!=null && vr.value>S.USL));
+    var oob = violByIdx[idx] || false;
+    return { idx:idx, row:row, valid: !!vr, value: vr?vr.value:null, oos: !!oos, oob: oob };
+  });
+}
+
+function renderDataTables(){
+  var all = annotatedRows();
+  var headers = S.headers.concat(["Status"]);
+
+  // mini preview (dashboard) — first 8 rows unfiltered
+  var theadMini = document.querySelector("#dataTableMini thead");
+  var tbodyMini = document.querySelector("#dataTableMini tbody");
+  theadMini.innerHTML = "<tr>"+headers.map(function(h){return "<th>"+escapeHtml(h)+"</th>";}).join("")+"</tr>";
+  tbodyMini.innerHTML = all.slice(0,8).map(rowToHtml.bind(null, S.headers)).join("");
+
+  renderFullDataTable(all);
+}
+
+function statusBadge(r){
+  if(!r.valid) return '<span class="badge neutral">excluded</span>';
+  if(r.oos) return '<span class="badge bad">out of spec</span>';
+  if(r.oob) return '<span class="badge warn">SPC signal</span>';
+  return '<span class="badge ok">ok</span>';
+}
+function rowToHtml(headers, r){
+  var cells = headers.map(function(h){ return "<td>"+escapeHtml(r.row[h])+"</td>"; }).join("");
+  return '<tr class="'+(r.oos||r.oob?"row-oos":"")+'">'+cells+"<td>"+statusBadge(r)+"</td></tr>";
+}
+
+var fullRowsCache = [];
+function renderFullDataTable(all){
+  fullRowsCache = all;
+  var headers = S.headers.concat(["Status"]);
+  var thead = document.querySelector("#dataTableFull thead");
+  thead.innerHTML = "<tr>"+headers.map(function(h,i){
+    var arrow = S.sortCol===h ? (S.sortDir>0?"▲":"▼") : "";
+    return '<th data-col="'+escapeHtml(h)+'">'+escapeHtml(h)+' <span class="arrow">'+arrow+'</span></th>';
+  }).join("")+"</tr>";
+  thead.querySelectorAll("th").forEach(function(th){
+    th.addEventListener("click", function(){
+      var col = th.getAttribute("data-col");
+      if(col==="Status") return;
+      if(S.sortCol===col) S.sortDir *= -1; else { S.sortCol=col; S.sortDir=1; }
+      renderFullDataTable(fullRowsCache);
+    });
+  });
+
+  var filtered = all.filter(function(r){
+    if(S.abnormalOnly && !(r.oos||r.oob||!r.valid)) return false;
+    if(S.search){
+      var hay = S.headers.map(function(h){return String(r.row[h]);}).join(" ").toLowerCase();
+      if(hay.indexOf(S.search.toLowerCase())===-1) return false;
+    }
+    return true;
+  });
+
+  if(S.sortCol){
+    filtered = filtered.slice().sort(function(a,b){
+      var av=a.row[S.sortCol], bv=b.row[S.sortCol];
+      var an=isNumeric(av), bn=isNumeric(bv);
+      if(an&&bn) return (toNum(av)-toNum(bv))*S.sortDir;
+      return String(av).localeCompare(String(bv))*S.sortDir;
+    });
+  }
+
+  var totalPages = Math.max(1, Math.ceil(filtered.length / S.pageSize));
+  if(S.page>totalPages) S.page=totalPages;
+  var startIdx = (S.page-1)*S.pageSize;
+  var pageRows = filtered.slice(startIdx, startIdx+S.pageSize);
+
+  document.querySelector("#dataTableFull tbody").innerHTML = pageRows.length
+    ? pageRows.map(rowToHtml.bind(null, S.headers)).join("")
+    : '<tr><td colspan="'+headers.length+'" style="text-align:center;color:var(--steel);padding:16px;">No rows match the current filter.</td></tr>';
+
+  el("pagerLabel").textContent = "Page "+S.page+" of "+totalPages+" ("+filtered.length+" rows)";
+  el("dataCountHint").textContent = filtered.length+" of "+all.length+" rows shown";
+}
+
+el("dataSearch").addEventListener("input", function(){ S.search = this.value; S.page=1; renderFullDataTable(fullRowsCache); });
+el("chkAbnormalOnly").addEventListener("change", function(){ S.abnormalOnly = this.checked; S.page=1; renderFullDataTable(fullRowsCache); });
+el("pagerPrev").addEventListener("click", function(){ if(S.page>1){ S.page--; renderFullDataTable(fullRowsCache); } });
+el("pagerNext").addEventListener("click", function(){ S.page++; renderFullDataTable(fullRowsCache); });
+el("pageSizeSel").addEventListener("change", function(){ S.pageSize=parseInt(this.value,10); S.page=1; renderFullDataTable(fullRowsCache); });
+
+/* ============================================================
+   EXCEL EXPORT
+   ============================================================ */
+function buildReportWorkbook(){
+  var A = S.analysis;
+  var wb = XLSX.utils.book_new();
+
+  // Raw Data — exactly as imported
+  var wsRaw = XLSX.utils.json_to_sheet(S.rawRows);
+  XLSX.utils.book_append_sheet(wb, wsRaw, "Raw Data");
+
+  // Statistical Summary
+  var summaryRows = [
+    ["Characteristic", S.charUnit || S.measurementCol],
+    ["Measurement column", S.measurementCol],
+    ["Subgroup size", S.subgroupSize],
+    ["Chart type", A.chartType==="IMR" ? "Individuals - Moving Range (I-MR)" : "X-bar / R"],
+    ["Sigma method for capability", S.sigmaMethod==="within" ? "Within-subgroup (R-bar or MR-bar / d2)" : "Overall sample standard deviation"],
+    [],
+    ["Observations (n)", A.n],
+    ["Mean", A.mean],
+    ["Median", A.median],
+    ["Std Dev (overall, sample)", A.stdev],
+    ["Std Dev (within-subgroup estimate)", A.sigmaWithin],
+    ["Minimum", A.min],
+    ["Maximum", A.max],
+    ["Range", A.range],
+    ["LSL", S.LSL],
+    ["Target", S.Target],
+    ["USL", S.USL],
+    ["Cp", A.cp],
+    ["Cpk", A.cpk],
+    ["Cpu", A.cpu],
+    ["Cpl", A.cpl]
+  ];
+  var wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Statistical Summary");
+
+  // SPC Analysis — chart points
+  var isIMR = A.chartType==="IMR";
+  var spcHeader = isIMR
+    ? ["Sample #","Individual Value","CL","UCL","LCL","In Control","Moving Range","MR CL","MR UCL","MR LCL"]
+    : ["Subgroup #","Subgroup Mean (Xbar)","X CL","X UCL","X LCL","In Control","Range (R)","R CL","R UCL","R LCL"];
+  var spcRows = [spcHeader];
+  A.primaryPoints.forEach(function(p, i){
+    var sp = A.secondaryPoints[i] || {};
+    var inControl = !(p.value>p.UCL || p.value<p.LCL);
+    spcRows.push([p.index, p.value, p.CL, p.UCL, p.LCL, inControl?"Yes":"No", sp.value, sp.CL, sp.UCL, sp.LCL]);
+  });
+  var wsSpc = XLSX.utils.aoa_to_sheet(spcRows);
+  XLSX.utils.book_append_sheet(wb, wsSpc, "SPC Analysis");
+
+  // CPK Analysis — histogram bins + indices
+  var values = S.validRows.map(function(r){return r.value;});
+  var binCount = Math.max(6, Math.min(14, Math.round(Math.sqrt(values.length))));
+  var lo = Math.min(A.min, S.LSL!=null?S.LSL:A.min);
+  var hi = Math.max(A.max, S.USL!=null?S.USL:A.max);
+  var width = (hi-lo)/binCount || 1;
+  var bins = new Array(binCount).fill(0);
+  values.forEach(function(v){ var idx=Math.min(binCount-1,Math.max(0,Math.floor((v-lo)/width))); bins[idx]++; });
+  var cpkRows = [["Bin Start","Bin End","Count"]];
+  bins.forEach(function(c,i){ cpkRows.push([lo+i*width, lo+(i+1)*width, c]); });
+  cpkRows.push([]);
+  cpkRows.push(["Cp", A.cp]); cpkRows.push(["Cpk", A.cpk]); cpkRows.push(["Cpu", A.cpu]); cpkRows.push(["Cpl", A.cpl]);
+  cpkRows.push(["Sigma used", A.sigmaForCpk]); cpkRows.push(["Sigma method", S.sigmaMethod]);
+  var wsCpk = XLSX.utils.aoa_to_sheet(cpkRows);
+  XLSX.utils.book_append_sheet(wb, wsCpk, "CPK Analysis");
+
+  // Out-of-Control Points
+  var oocRows = [["Point #","Rule Violated","Value","Limit","Suggested Area for Investigation"]];
+  A.violations.forEach(function(v){ oocRows.push([v.index, v.rule, v.value, v.limit, v.suggestion]); });
+  oocRows.push([]);
+  oocRows.push(["Spec Violations"]);
+  oocRows.push(["Sample No.","Value","Type"]);
+  A.specViolations.forEach(function(v){ oocRows.push([v.row[S.colMap.sampleNo]||"", v.value, v.type]); });
+  var wsOoc = XLSX.utils.aoa_to_sheet(oocRows);
+  XLSX.utils.book_append_sheet(wb, wsOoc, "Out-of-Control Points");
+
+  return wb;
+}
+
+function doExport(){
+  if(!S.analysis) return;
+  var wb = buildReportWorkbook();
+  var arrBuf = XLSX.write(wb, {bookType:"xlsx", type:"array"});
+  var filename = "SPC_CPK_Report_" + (S.measurementCol||"analysis").replace(/[^a-z0-9]+/gi,"_") + ".xlsx";
+
+  claude.use("downloads").then(function(downloads){
+    if(!downloads){
+      el("exportHint").innerHTML = '<span style="color:var(--red);">Downloads are not available in this view.</span>';
+      return;
+    }
+    downloads.save({ filename: filename, data: arrBuf }).then(function(res){
+      el("exportHint").innerHTML = '<span style="color:var(--green);">Report '+(res.status==="saved"?"saved":"delivered")+': '+escapeHtml(filename)+'</span>';
+    }).catch(function(err){
+      if(err && err.code==="declined"){ el("exportHint").textContent = "Export canceled."; }
+      else { el("exportHint").innerHTML = '<span style="color:var(--red);">Could not save file: '+escapeHtml((err&&err.message)||"unknown error")+'</span>'; }
+    });
+  });
+}
+el("btnExport").addEventListener("click", doExport);
+el("btnExport2").addEventListener("click", doExport);
+
+/* init */
+runValidation();
+
+})();
+</script>
+</body>
+</html>
